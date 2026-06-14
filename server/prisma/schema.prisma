@@ -1,0 +1,277 @@
+// Prisma schema - PostgreSQL data model for Folk & Forks POS
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  employee
+  customer
+}
+
+enum TableStatus {
+  available
+  reserved
+  occupied
+  cleaning
+}
+
+enum BookingStatus {
+  confirmed
+  cancelled
+  completed
+}
+
+enum OrderStatus {
+  pending
+  preparing
+  ready
+  served
+  completed
+  draft
+  paid
+  cancelled
+}
+
+enum PaymentStatus {
+  unpaid
+  paid
+}
+
+enum PaymentMethod {
+  cash
+  card
+  upi
+}
+
+enum DiscountType {
+  percentage
+  fixed
+}
+
+enum AppliesTo {
+  product
+  order
+}
+
+enum KitchenStatus {
+  pending
+  to_cook   @map("to-cook")
+  preparing
+  completed
+}
+
+model User {
+  id         String   @id @default(uuid())
+  name       String
+  email      String   @unique
+  password   String
+  role       UserRole
+  isArchived Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  orders         Order[]       @relation("EmployeeOrders")
+  sessionsOpened Session[]     @relation("OpenedSessions")
+  activityLogs   ActivityLog[]
+
+  @@map("users")
+}
+
+model Category {
+  id    String @id @default(uuid())
+  name  String
+  color String
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id               String   @id @default(uuid())
+  name             String
+  categoryId       String
+  price            Float
+  unitOfMeasure    String?
+  tax              Float    @default(0)
+  description      String?
+  isAvailableOnKDS Boolean  @default(true)
+  isActive         Boolean  @default(true)
+
+  category   Category    @relation(fields: [categoryId], references: [id])
+  promotions Promotion[]
+  orderItems OrderItem[]
+
+  @@map("products")
+}
+
+model Floor {
+  id   String @id @default(uuid())
+  name String
+
+  tables   DiningTable[]
+  bookings Booking[]
+
+  @@map("floors")
+}
+
+model DiningTable {
+  id            String      @id @default(uuid())
+  tableNumber   String
+  seats         Int
+  floorId       String
+  isActive      Boolean     @default(true)
+  currentStatus TableStatus @default(available)
+
+  floor    Floor     @relation(fields: [floorId], references: [id])
+  bookings Booking[]
+  orders   Order[]
+
+  @@map("tables")
+}
+
+model Coupon {
+  id            String       @id @default(uuid())
+  code          String       @unique
+  discountType  DiscountType
+  discountValue Float
+  isActive      Boolean      @default(true)
+
+  @@map("coupons")
+}
+
+model Promotion {
+  id                 String       @id @default(uuid())
+  name               String
+  appliesTo          AppliesTo
+  productId          String?
+  minimumQuantity    Int?
+  minimumOrderAmount Float?
+  discountType       DiscountType
+  discountValue      Float
+  isActive           Boolean      @default(true)
+
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@map("promotions")
+}
+
+model PaymentSettings {
+  id    String  @id @default(uuid())
+  cash  Boolean @default(true)
+  card  Boolean @default(true)
+  upi   Boolean @default(false)
+  upiId String?
+
+  @@map("payment_settings")
+}
+
+model Customer {
+  id    String  @id @default(uuid())
+  name  String
+  email String?
+  phone String?
+
+  bookings Booking[]
+  orders   Order[]
+
+  @@map("customers")
+}
+
+model Booking {
+  id                    String        @id @default(uuid())
+  customerId            String
+  tableId               String
+  floorId               String
+  date                  DateTime
+  time                  String
+  numberOfGuests        Int
+  status                BookingStatus @default(confirmed)
+  confirmationEmailSent Boolean       @default(false)
+
+  customer Customer    @relation(fields: [customerId], references: [id])
+  table    DiningTable @relation(fields: [tableId], references: [id])
+  floor    Floor       @relation(fields: [floorId], references: [id])
+
+  @@map("bookings")
+}
+
+model Session {
+  id                String    @id @default(uuid())
+  openedById        String
+  openedAt          DateTime  @default(now())
+  closedAt          DateTime?
+  isOpen            Boolean   @default(true)
+  closingSaleAmount Float?
+  totalOrders       Int       @default(0)
+
+  openedBy User    @relation("OpenedSessions", fields: [openedById], references: [id])
+  orders   Order[]
+
+  @@map("sessions")
+}
+
+model Order {
+  id                 String         @id @default(uuid())
+  orderNumber        String         @unique
+  tableId            String?
+  customerId         String?
+  employeeId         String
+  subtotal           Float          @default(0)
+  taxAmount          Float          @default(0)
+  discountAmount     Float          @default(0)
+  couponCode         String?
+  total              Float          @default(0)
+  paymentMethod      PaymentMethod?
+  paymentStatus      PaymentStatus  @default(unpaid)
+  cashReceived       Float?
+  changeGiven        Float?
+  cardTransactionRef String?
+  status             OrderStatus    @default(draft)
+  receiptEmailSent   Boolean        @default(false)
+  sessionId          String?
+  createdAt          DateTime       @default(now())
+
+  table    DiningTable? @relation(fields: [tableId], references: [id])
+  customer Customer?    @relation(fields: [customerId], references: [id])
+  employee User         @relation("EmployeeOrders", fields: [employeeId], references: [id])
+  session  Session?     @relation(fields: [sessionId], references: [id])
+  items    OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id            String        @id @default(uuid())
+  orderId       String
+  productId     String
+  name          String
+  quantity      Int
+  unitPrice     Float
+  lineTotal     Float
+  notes         String?
+  sentToKitchen Boolean       @default(false)
+  kitchenStatus KitchenStatus @default(pending)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
